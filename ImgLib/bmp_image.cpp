@@ -6,6 +6,9 @@
 
 namespace img_lib {
 
+#define BMP_BYTES_PER_PIXEL 3
+#define BMP_ROW_ALIGNMENT 4
+
 PACKED_STRUCT_BEGIN BitmapFileHeader {
   uint16_t bf_type;
   uint32_t bf_size;
@@ -29,8 +32,12 @@ PACKED_STRUCT_BEGIN BitmapInfoHeader {
 }
 PACKED_STRUCT_END;
 
-static int GetBMPStride(int w) { return 4 * ((w * 3 + 3) / 4); }
-bool SaveBMP(const Path& file, const Image& image) {
+static int GetBMPStride(int w) {
+  return BMP_ROW_ALIGNMENT *
+         ((w * BMP_BYTES_PER_PIXEL + (BMP_ROW_ALIGNMENT - 1)) /
+          BMP_ROW_ALIGNMENT);
+}
+bool SaveBMP(const Path &file, const Image &image) {
   int stride = GetBMPStride(image.GetWidth());
   uint32_t data_size = stride * image.GetHeight();
 
@@ -59,12 +66,12 @@ bool SaveBMP(const Path& file, const Image& image) {
   info_header.bi_clr_used = 0;
   info_header.bi_clr_important = 0x1000000;
 
-  ofs.write(reinterpret_cast<const char*>(&file_header), sizeof(file_header));
-  ofs.write(reinterpret_cast<const char*>(&info_header), sizeof(info_header));
+  ofs.write(reinterpret_cast<const char *>(&file_header), sizeof(file_header));
+  ofs.write(reinterpret_cast<const char *>(&info_header), sizeof(info_header));
 
   std::vector<char> row(stride);
   for (int y = image.GetHeight() - 1; y >= 0; --y) {
-    const Color* line = image.GetLine(y);
+    const Color *line = image.GetLine(y);
     for (int x = 0; x < image.GetWidth(); ++x) {
       int idx = x * 3;
       row[idx + 0] = static_cast<char>(line[x].b);
@@ -77,17 +84,27 @@ bool SaveBMP(const Path& file, const Image& image) {
     ofs.write(row.data(), stride);
   }
 
-  return true;
+  return ofs.good();
 }
 
-Image LoadBMP(const Path& file) {
+Image LoadBMP(const Path &file) {
   std::ifstream ifs(file, std::ios::binary);
+  if (!ifs.good()) {
+    return Image(0, 0, Color::Black());
+  }
 
   BitmapFileHeader file_header;
-  ifs.read(reinterpret_cast<char*>(&file_header), sizeof(file_header));
+  ifs.read(reinterpret_cast<char *>(&file_header), sizeof(file_header));
+  if (!ifs.good() || file_header.bf_type != (static_cast<uint16_t>('B') |
+                                             static_cast<uint16_t>('M') << 8)) {
+    return Image(0, 0, Color::Black());
+  }
 
   BitmapInfoHeader info_header;
-  ifs.read(reinterpret_cast<char*>(&info_header), sizeof(info_header));
+  ifs.read(reinterpret_cast<char *>(&info_header), sizeof(info_header));
+  if (!ifs.good()) {
+    return Image(0, 0, Color::Black());
+  }
 
   ifs.seekg(file_header.bf_off_bits, std::ios::beg);
 
@@ -96,8 +113,8 @@ Image LoadBMP(const Path& file) {
   int stride = GetBMPStride(info_header.bi_width);
   std::vector<std::byte> row(stride);
   for (int y = 0; y != info_header.bi_height; ++y) {
-    ifs.read(reinterpret_cast<char*>(row.data()), stride);
-    Color* line = result.GetLine(info_header.bi_height - y - 1);
+    ifs.read(reinterpret_cast<char *>(row.data()), stride);
+    Color *line = result.GetLine(info_header.bi_height - y - 1);
     for (int x = 0; x < info_header.bi_width; ++x) {
       int idx = x * 3;
       line[x].b = row[idx + 0];
